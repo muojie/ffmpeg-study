@@ -23,6 +23,7 @@
 *******************************************************************************/
 //！！！！！！！！！ 加群23304930下载代码和交流
 
+
 #include <jni.h>
 #include <string>
 #include <android/log.h>
@@ -52,6 +53,8 @@ Java_aplay_testffmpeg_MainActivity_stringFromJNI(
     av_register_all();
     //初始化网络
     avformat_network_init();
+
+    avcodec_register_all();
 
     //打开文件
     AVFormatContext *ic = NULL;
@@ -104,6 +107,52 @@ Java_aplay_testffmpeg_MainActivity_stringFromJNI(
         }
     }
     //ic->streams[videoStream];
+    //获取音频流信息
+    audioStream = av_find_best_stream(ic,AVMEDIA_TYPE_AUDIO,-1,-1,NULL,0);
+    LOGW("av_find_best_stream audioStream = %d",audioStream);
+
+    //软解码器
+    AVCodec *codec = avcodec_find_decoder(ic->streams[videoStream]->codecpar->codec_id);
+    //硬解码
+    //codec = avcodec_find_decoder_by_name("h264_mediacodec");
+    if(!codec)
+    {
+        LOGW("avcodec_find failed!");
+        return env->NewStringUTF(hello.c_str());
+    }
+    //解码器初始化
+    AVCodecContext *cc = avcodec_alloc_context3(codec);
+    avcodec_parameters_to_context(cc,ic->streams[videoStream]->codecpar);
+    cc->thread_count = 1;
+    //打开解码器
+    re = avcodec_open2(cc,0,0);
+    if(re != 0)
+    {
+        LOGW("avcodec_open2 failed!");
+        return env->NewStringUTF(hello.c_str());
+    }
+        //读取帧数据
+    AVPacket *pkt = av_packet_alloc();
+    for(;;)
+    {
+        int re = av_read_frame(ic,pkt);
+        if(re != 0)
+        {
+
+            LOGW("读取到结尾处!");
+            int pos = 20 * r2d(ic->streams[videoStream]->time_base);
+            av_seek_frame(ic,videoStream,pos,AVSEEK_FLAG_BACKWARD|AVSEEK_FLAG_FRAME );
+            continue;
+        }
+        LOGW("stream = %d size =%d pts=%lld flag=%d",
+             pkt->stream_index,pkt->size,pkt->pts,pkt->flags
+        );
+        //////////////////////
+
+        //清理
+        av_packet_unref(pkt);
+    }
+
 
 
     //关闭上下文
