@@ -19,6 +19,7 @@ public class MainActivity extends AppCompatActivity {
             "android.permission.READ_EXTERNAL_STORAGE",
             "android.permission.WRITE_EXTERNAL_STORAGE" };
 
+
     public static void verifyStoragePermissions(Activity activity) {
 
         try {
@@ -40,10 +41,10 @@ public class MainActivity extends AppCompatActivity {
         setContentView( R.layout.activity_main );
 
         verifyStoragePermissions(this);
-
         // Example of a call to a native method
         TextView tv = (TextView) findViewById( R.id.sample_text );
-        Open( "/sdcard/1080.mp4",this );
+        String str = "/sdcard/1080.mp4";
+        //Open( str,this );
         tv.setText( stringFromJNI() );
     }
 
@@ -54,3 +55,4 @@ public class MainActivity extends AppCompatActivity {
     public native String stringFromJNI();
     public native boolean Open(String url,Object handle);
 }
+
