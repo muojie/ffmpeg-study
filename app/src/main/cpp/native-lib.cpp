@@ -32,6 +32,7 @@
 extern "C"{
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
+#include <libavcodec/jni.h>
 }
 #include<iostream>
 using namespace std;
@@ -50,7 +51,13 @@ long long GetNowMs()
     long long t = sec*1000+tv.tv_usec/1000;
     return t;
 }
-
+extern "C"
+JNIEXPORT
+jint JNI_OnLoad(JavaVM *vm,void *res)
+{
+    av_jni_set_java_vm(vm,0);
+    return JNI_VERSION_1_4;
+}
 
 extern "C"
 JNIEXPORT jstring
@@ -126,7 +133,7 @@ Java_aplay_testffmpeg_MainActivity_stringFromJNI(
     //软解码器
     AVCodec *codec = avcodec_find_decoder(ic->streams[videoStream]->codecpar->codec_id);
     //硬解码
-    //codec = avcodec_find_decoder_by_name("h264_mediacodec");
+    codec = avcodec_find_decoder_by_name("h264_mediacodec");
     if(!codec)
     {
         LOGW("avcodec_find failed!");
@@ -134,11 +141,9 @@ Java_aplay_testffmpeg_MainActivity_stringFromJNI(
     }
     //解码器初始化
     AVCodecContext *vc = avcodec_alloc_context3(codec);
-   // LOGW("streams timebase = %d/%d",ic->streams[videoStream]->time_base.num,ic->streams[videoStream]->time_base.den);
     avcodec_parameters_to_context(vc,ic->streams[videoStream]->codecpar);
-    //vc->time_base = ic->streams[videoStream]->time_base;
-   // LOGW("vc timebase = %d",vc->time_base.den);
-    vc->thread_count = 1;
+
+    vc->thread_count = 8;
     //打开解码器
     re = avcodec_open2(vc,0,0);
     //vc->time_base = ic->streams[videoStream]->time_base;
@@ -163,7 +168,7 @@ Java_aplay_testffmpeg_MainActivity_stringFromJNI(
     //解码器初始化
     AVCodecContext *ac = avcodec_alloc_context3(acodec);
     avcodec_parameters_to_context(ac,ic->streams[audioStream]->codecpar);
-    ac->thread_count = 1;
+    ac->thread_count = 8;
     //打开解码器
     re = avcodec_open2(ac,0,0);
     if(re != 0)
@@ -174,8 +179,18 @@ Java_aplay_testffmpeg_MainActivity_stringFromJNI(
         //读取帧数据
     AVPacket *pkt = av_packet_alloc();
     AVFrame *frame = av_frame_alloc();
+    long long start = GetNowMs();
+    int frameCount = 0;
     for(;;)
     {
+        //超过三秒
+        if(GetNowMs() - start >= 3000)
+        {
+            LOGW("now decode fps is %d",frameCount/3);
+            start = GetNowMs();
+            frameCount = 0;
+        }
+
         int re = av_read_frame(ic,pkt);
         if(re != 0)
         {
@@ -217,7 +232,13 @@ Java_aplay_testffmpeg_MainActivity_stringFromJNI(
                 //LOGW("avcodec_receive_frame failed!");
                 break;
             }
-            LOGW("avcodec_receive_frame %lld",frame->pts);
+            //LOGW("avcodec_receive_frame %lld",frame->pts);
+            //如果是视频帧
+            if(cc == vc)
+            {
+                frameCount++;
+            }
+
         }
 
         //////////////////////
