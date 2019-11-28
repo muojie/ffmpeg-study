@@ -33,6 +33,7 @@ extern "C"{
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libavcodec/jni.h>
+#include <libswscale/swscale.h>
 }
 #include<iostream>
 using namespace std;
@@ -176,11 +177,18 @@ Java_aplay_testffmpeg_MainActivity_stringFromJNI(
         LOGW("avcodec_open2  audio failed!");
         return env->NewStringUTF(hello.c_str());
     }
-        //读取帧数据
+    //读取帧数据
     AVPacket *pkt = av_packet_alloc();
     AVFrame *frame = av_frame_alloc();
     long long start = GetNowMs();
     int frameCount = 0;
+
+
+    //初始化像素格式转换的上下文
+    SwsContext *vctx = NULL;
+    int outWidth = 1280;
+    int outHeight = 720;
+    char *rgb = new char[1920*1080*4];
     for(;;)
     {
         //超过三秒
@@ -224,6 +232,8 @@ Java_aplay_testffmpeg_MainActivity_stringFromJNI(
             LOGW("avcodec_send_packet failed!");
             continue;
         }
+
+
         for(;;)
         {
             re = avcodec_receive_frame(cc,frame);
@@ -237,6 +247,34 @@ Java_aplay_testffmpeg_MainActivity_stringFromJNI(
             if(cc == vc)
             {
                 frameCount++;
+                vctx = sws_getCachedContext(vctx,
+                                            frame->width,
+                                            frame->height,
+                                            (AVPixelFormat)frame->format,
+                                            outWidth,
+                                            outHeight,
+                                            AV_PIX_FMT_RGBA,
+                                            SWS_FAST_BILINEAR,
+                                            0,0,0
+                );
+                if(!vctx)
+                {
+                    LOGW("sws_getCachedContext failed!");
+                }
+                else
+                {
+                    uint8_t *data[AV_NUM_DATA_POINTERS] = {0};
+                    data[0] =(uint8_t *)rgb;
+                    int lines[AV_NUM_DATA_POINTERS] = {0};
+                    lines[0] = outWidth * 4;
+                    int h = sws_scale(vctx,
+                                      (const uint8_t **)frame->data,
+                                      frame->linesize,0,
+                                      frame->height,
+                                      data,lines);
+                    LOGW("sws_scale = %d",h);
+                }
+
             }
 
         }
@@ -245,6 +283,7 @@ Java_aplay_testffmpeg_MainActivity_stringFromJNI(
 
 
     }
+    delete rgb;
 
 
 
