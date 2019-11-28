@@ -23,10 +23,11 @@
 *******************************************************************************/
 //！！！！！！！！！ 加群23304930下载代码和交流
 
-
 #include <jni.h>
 #include <string>
 #include <android/log.h>
+#include <android/native_window.h>
+#include <android/native_window_jni.h>
 #define LOGW(...) __android_log_print(ANDROID_LOG_WARN,"testff",__VA_ARGS__)
 
 extern "C"{
@@ -68,7 +69,16 @@ Java_aplay_testffmpeg_MainActivity_stringFromJNI(
         JNIEnv *env,
         jobject /* this */) {
     std::string hello = "Hello from C++ ";
+    // TODO
     hello += avcodec_configuration();
+    return env->NewStringUTF(hello.c_str());
+}
+
+extern "C"
+JNIEXPORT void JNICALL
+Java_aplay_testffmpeg_XPlay_Open(JNIEnv *env, jobject instance, jstring url_, jobject surface) {
+    const char *path = env->GetStringUTFChars(url_, 0);
+
     //初始化解封装
     av_register_all();
     //初始化网络
@@ -78,13 +88,12 @@ Java_aplay_testffmpeg_MainActivity_stringFromJNI(
 
     //打开文件
     AVFormatContext *ic = NULL;
-    char path[] = "/sdcard/1080.mp4";
     //char path[] = "/sdcard/video.flv";
     int re = avformat_open_input(&ic,path,0,0);
     if(re != 0)
     {
         LOGW("avformat_open_input failed!:%s",av_err2str(re));
-        return env->NewStringUTF(hello.c_str());
+        return;
     }
     LOGW("avformat_open_input %s success!",path);
     //获取流信息
@@ -139,7 +148,7 @@ Java_aplay_testffmpeg_MainActivity_stringFromJNI(
     if(!codec)
     {
         LOGW("avcodec_find failed!");
-        return env->NewStringUTF(hello.c_str());
+        return;
     }
     //解码器初始化
     AVCodecContext *vc = avcodec_alloc_context3(codec);
@@ -153,7 +162,7 @@ Java_aplay_testffmpeg_MainActivity_stringFromJNI(
     if(re != 0)
     {
         LOGW("avcodec_open2 video failed!");
-        return env->NewStringUTF(hello.c_str());
+        return;
     }
 
     //////////////////////////////////////////////////////////
@@ -165,7 +174,7 @@ Java_aplay_testffmpeg_MainActivity_stringFromJNI(
     if(!acodec)
     {
         LOGW("avcodec_find failed!");
-        return env->NewStringUTF(hello.c_str());
+        return;
     }
     //音频解码器初始化
     AVCodecContext *ac = avcodec_alloc_context3(acodec);
@@ -176,7 +185,7 @@ Java_aplay_testffmpeg_MainActivity_stringFromJNI(
     if(re != 0)
     {
         LOGW("avcodec_open2  audio failed!");
-        return env->NewStringUTF(hello.c_str());
+        return;
     }
     //读取帧数据
     AVPacket *pkt = av_packet_alloc();
@@ -210,7 +219,10 @@ Java_aplay_testffmpeg_MainActivity_stringFromJNI(
         LOGW("swr_init success!");
     }
 
-
+    //显示窗口初始化
+    ANativeWindow *nwin = ANativeWindow_fromSurface(env,surface);
+    ANativeWindow_setBuffersGeometry(nwin,outWidth,outHeight,WINDOW_FORMAT_RGBA_8888);
+    ANativeWindow_Buffer wbuf;
 
     for(;;)
     {
@@ -231,14 +243,6 @@ Java_aplay_testffmpeg_MainActivity_stringFromJNI(
             av_seek_frame(ic,videoStream,pos,AVSEEK_FLAG_BACKWARD|AVSEEK_FLAG_FRAME );
             continue;
         }
-        //只测试视频
-        /*if(pkt->stream_index !=videoStream)
-        {
-            continue;
-        }*/
-        //LOGW("stream = %d size =%d pts=%lld flag=%d",
-        //     pkt->stream_index,pkt->size,pkt->pts,pkt->flags
-        //);
 
         AVCodecContext *cc = vc;
         if(pkt->stream_index == audioStream)
@@ -255,7 +259,6 @@ Java_aplay_testffmpeg_MainActivity_stringFromJNI(
             LOGW("avcodec_send_packet failed!");
             continue;
         }
-
 
         for(;;)
         {
@@ -296,6 +299,13 @@ Java_aplay_testffmpeg_MainActivity_stringFromJNI(
                                       frame->height,
                                       data,lines);
                     LOGW("sws_scale = %d",h);
+                    if(h > 0)
+                    {
+                        ANativeWindow_lock(nwin,&wbuf,0);
+                        uint8_t *dst = (uint8_t*)wbuf.bits;
+                        memcpy(dst,rgb,outWidth*outHeight*4);
+                        ANativeWindow_unlockAndPost(nwin);
+                    }
                 }
 
             }
@@ -325,25 +335,8 @@ Java_aplay_testffmpeg_MainActivity_stringFromJNI(
 
     //关闭上下文
     avformat_close_input(&ic);
-    return env->NewStringUTF(hello.c_str());
-}
-extern "C"
-JNIEXPORT jboolean JNICALL
-Java_aplay_testffmpeg_MainActivity_Open(JNIEnv *env, jobject instance, jstring url_,
-                                        jobject handle) {
-    const char *url = env->GetStringUTFChars(url_, 0);
 
-    // TODO
-    FILE *fp = fopen(url,"rb");
-    if(!fp)
-    {
-        LOGW("File %s open failed!",url);
-    }
-    else
-    {
-        LOGW("File %s open succes!",url);
-        fclose(fp);
-    }
-    env->ReleaseStringUTFChars(url_, url);
-    return true;
+
+
+    env->ReleaseStringUTFChars(url_, path);
 }
