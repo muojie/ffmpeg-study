@@ -23,6 +23,7 @@
 *******************************************************************************/
 //！！！！！！！！！ 加群23304930下载代码和交流
 
+
 #include <jni.h>
 #include <string>
 #include <android/log.h>
@@ -176,6 +177,55 @@ Java_aplay_testopengles_XPlay_Open(JNIEnv *env, jobject instance, jstring url_, 
     //片元yuv420 shader初始化
     GLint fsh = InitShader(fragYUV420P,GL_FRAGMENT_SHADER);
 
+
+    /////////////////////////////////////////////////////////////
+    //创建渲染程序
+    GLint program = glCreateProgram();
+    if(program == 0)
+    {
+        LOGD("glCreateProgram failed!");
+        return;
+    }
+    //渲染程序中加入着色器代码
+    glAttachShader(program,vsh);
+    glAttachShader(program,fsh);
+
+    //链接程序
+    glLinkProgram(program);
+    GLint status = 0;
+    glGetProgramiv(program,GL_LINK_STATUS,&status);
+    if(status != GL_TRUE)
+    {
+        LOGD("glLinkProgram failed!");
+        return;
+    }
+    glUseProgram(program);
+    LOGD("glLinkProgram success!");
+    /////////////////////////////////////////////////////////////
+
+
+    //加入三维顶点数据 两个三角形组成正方形
+    static float vers[] = {
+            1.0f,-1.0f,0.0f,
+            -1.0f,-1.0f,0.0f,
+            1.0f,1.0f,0.0f,
+            -1.0f,1.0f,0.0f,
+    };
+    GLuint apos = (GLuint)glGetAttribLocation(program,"aPosition");
+    glEnableVertexAttribArray(apos);
+    //传递顶点
+    glVertexAttribPointer(apos,3,GL_FLOAT,GL_FALSE,12,vers);
+
+    //加入材质坐标数据
+    static float txts[] = {
+            1.0f,0.0f , //右下
+            0.0f,0.0f,
+            1.0f,1.0f,
+            0.0,1.0
+    };
+    GLuint atex = (GLuint)glGetAttribLocation(program,"aTexCoord");
+    glEnableVertexAttribArray(atex);
+    glVertexAttribPointer(atex,2,GL_FLOAT,GL_FALSE,8,txts);
 
 
 
