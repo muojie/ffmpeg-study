@@ -26,317 +26,159 @@
 #include <jni.h>
 #include <string>
 #include <android/log.h>
-#include <android/native_window.h>
 #include <android/native_window_jni.h>
-#define LOGW(...) __android_log_print(ANDROID_LOG_WARN,"testff",__VA_ARGS__)
+#include <EGL/egl.h>
+#include <GLES2/gl2.h>
 
-extern "C"{
-#include <libavcodec/avcodec.h>
-#include <libavformat/avformat.h>
-#include <libavcodec/jni.h>
-#include <libswscale/swscale.h>
-#include <libswresample/swresample.h>
-}
-#include<iostream>
-using namespace std;
+#define LOGD(...) __android_log_print(ANDROID_LOG_WARN,"testff",__VA_ARGS__)
 
-static double r2d(AVRational r)
+
+//顶点着色器glsl
+#define GET_STR(x) #x
+static const char *vertexShader = GET_STR(
+    attribute vec4 aPosition; //顶点坐标
+    attribute vec2 aTexCoord; //材质顶点坐标
+    varying vec2 vTexCoord;   //输出的材质坐标
+    void main(){
+        vTexCoord = vec2(aTexCoord.x,1.0-aTexCoord.y);
+        gl_Position = aPosition;
+    }
+);
+
+//片元着色器,软解码和部分x86硬解码
+static const char *fragYUV420P = GET_STR(
+    precision mediump float;    //精度
+    varying vec2 vTexCoord;     //顶点着色器传递的坐标
+    uniform sampler2D yTexture; //输入的材质（不透明灰度，单像素）
+    uniform sampler2D uTexture;
+    uniform sampler2D vTexture;
+    void main(){
+        vec3 yuv;
+        vec3 rgb;
+        yuv.r = texture2D(yTexture,vTexCoord).r;
+        yuv.g = texture2D(uTexture,vTexCoord).r - 0.5;
+        yuv.b = texture2D(vTexture,vTexCoord).r - 0.5;
+        rgb = mat3(1.0,     1.0,    1.0,
+                   0.0,-0.39465,2.03211,
+                   1.13983,-0.58060,0.0)*yuv;
+        //输出像素颜色
+        gl_FragColor = vec4(rgb,1.0);
+    }
+);
+
+GLint InitShader(const char *code,GLint type)
 {
-    return r.num==0||r.den == 0 ? 0 :(double)r.num/(double)r.den;
+    //创建shader
+    GLint sh = glCreateShader(type);
+    if(sh == 0)
+    {
+        LOGD("glCreateShader %d failed!",type);
+        return 0;
+    }
+    //加载shader
+    glShaderSource(sh,
+                   1,    //shader数量
+                   &code, //shader代码
+                   0);   //代码长度
+    //编译shader
+    glCompileShader(sh);
+
+    //获取编译情况
+    GLint status;
+    glGetShaderiv(sh,GL_COMPILE_STATUS,&status);
+    if(status == 0)
+    {
+        LOGD("glCompileShader failed!");
+        return 0;
+    }
+    LOGD("glCompileShader success!");
+    return sh;
 }
 
-//当前时间戳 clock
-long long GetNowMs()
-{
-    struct timeval tv;
-    gettimeofday(&tv,NULL);
-    int sec = tv.tv_sec%360000;
-    long long t = sec*1000+tv.tv_usec/1000;
-    return t;
-}
-extern "C"
-JNIEXPORT
-jint JNI_OnLoad(JavaVM *vm,void *res)
-{
-    av_jni_set_java_vm(vm,0);
-    return JNI_VERSION_1_4;
-}
 
 extern "C"
 JNIEXPORT jstring
+
 JNICALL
-Java_aplay_testffmpeg_MainActivity_stringFromJNI(
+Java_aplay_testopengles_MainActivity_stringFromJNI(
         JNIEnv *env,
         jobject /* this */) {
-    std::string hello = "Hello from C++ ";
-    // TODO
-    hello += avcodec_configuration();
+    std::string hello = "Hello from C++";
     return env->NewStringUTF(hello.c_str());
 }
-
 extern "C"
 JNIEXPORT void JNICALL
-Java_aplay_testffmpeg_XPlay_Open(JNIEnv *env, jobject instance, jstring url_, jobject surface) {
-    const char *path = env->GetStringUTFChars(url_, 0);
-
-    //初始化解封装
-    av_register_all();
-    //初始化网络
-    avformat_network_init();
-
-    avcodec_register_all();
-
-    //打开文件
-    AVFormatContext *ic = NULL;
-    //char path[] = "/sdcard/video.flv";
-    int re = avformat_open_input(&ic,path,0,0);
-    if(re != 0)
-    {
-        LOGW("avformat_open_input failed!:%s",av_err2str(re));
-        return;
-    }
-    LOGW("avformat_open_input %s success!",path);
-    //获取流信息
-    re = avformat_find_stream_info(ic,0);
-    if(re != 0)
-    {
-        LOGW("avformat_find_stream_info failed!");
-    }
-    LOGW("duration = %lld nb_streams = %d",ic->duration,ic->nb_streams);
-
-    int fps = 0;
-    int videoStream = 0;
-    int audioStream = 1;
-
-    for(int i = 0; i < ic->nb_streams; i++)
-    {
-        AVStream *as = ic->streams[i];
-        if(as->codecpar->codec_type == AVMEDIA_TYPE_VIDEO)
-        {
-            LOGW("视频数据");
-            videoStream = i;
-            fps = r2d(as->avg_frame_rate);
-
-            LOGW("fps = %d,width=%d height=%d codeid=%d pixformat=%d",fps,
-                 as->codecpar->width,
-                 as->codecpar->height,
-                 as->codecpar->codec_id,
-                 as->codecpar->format
-            );
-        }
-        else if(as->codecpar->codec_type ==AVMEDIA_TYPE_AUDIO )
-        {
-            LOGW("音频数据");
-            audioStream = i;
-            LOGW("sample_rate=%d channels=%d sample_format=%d",
-                 as->codecpar->sample_rate,
-                 as->codecpar->channels,
-                 as->codecpar->format
-            );
-        }
-    }
-    //ic->streams[videoStream];
-    //获取音频流信息
-    audioStream = av_find_best_stream(ic,AVMEDIA_TYPE_AUDIO,-1,-1,NULL,0);
-    LOGW("av_find_best_stream audioStream = %d",audioStream);
-    //////////////////////////////////////////////////////////
-    //打开视频解码器
-    //软解码器
-    AVCodec *codec = avcodec_find_decoder(ic->streams[videoStream]->codecpar->codec_id);
-    //硬解码
-    codec = avcodec_find_decoder_by_name("h264_mediacodec");
-    if(!codec)
-    {
-        LOGW("avcodec_find failed!");
-        return;
-    }
-    //解码器初始化
-    AVCodecContext *vc = avcodec_alloc_context3(codec);
-    avcodec_parameters_to_context(vc,ic->streams[videoStream]->codecpar);
-
-    vc->thread_count = 8;
-    //打开解码器
-    re = avcodec_open2(vc,0,0);
-    //vc->time_base = ic->streams[videoStream]->time_base;
-    LOGW("vc timebase = %d/ %d",vc->time_base.num,vc->time_base.den);
-    if(re != 0)
-    {
-        LOGW("avcodec_open2 video failed!");
-        return;
-    }
-
-    //////////////////////////////////////////////////////////
-    //打开音频解码器
-    //软解码器
-    AVCodec *acodec = avcodec_find_decoder(ic->streams[audioStream]->codecpar->codec_id);
-    //硬解码
-    //codec = avcodec_find_decoder_by_name("h264_mediacodec");
-    if(!acodec)
-    {
-        LOGW("avcodec_find failed!");
-        return;
-    }
-    //音频解码器初始化
-    AVCodecContext *ac = avcodec_alloc_context3(acodec);
-    avcodec_parameters_to_context(ac,ic->streams[audioStream]->codecpar);
-    ac->thread_count = 8;
-    //打开解码器
-    re = avcodec_open2(ac,0,0);
-    if(re != 0)
-    {
-        LOGW("avcodec_open2  audio failed!");
-        return;
-    }
-    //读取帧数据
-    AVPacket *pkt = av_packet_alloc();
-    AVFrame *frame = av_frame_alloc();
-    long long start = GetNowMs();
-    int frameCount = 0;
-
-
-    //初始化像素格式转换的上下文
-    SwsContext *vctx = NULL;
-    int outWidth = 1280;
-    int outHeight = 720;
-    char *rgb = new char[1920*1080*4];
-    char *pcm = new char[48000*4*2];
-
-    //音频重采样上下文初始化
-    SwrContext *actx = swr_alloc();
-    actx = swr_alloc_set_opts(actx,
-                              av_get_default_channel_layout(2),
-                              AV_SAMPLE_FMT_S16,ac->sample_rate,
-                              av_get_default_channel_layout(ac->channels),
-                              ac->sample_fmt,ac->sample_rate,
-                              0,0 );
-    re = swr_init(actx);
-    if(re != 0)
-    {
-        LOGW("swr_init failed!");
-    }
-    else
-    {
-        LOGW("swr_init success!");
-    }
-
-    //显示窗口初始化
+Java_aplay_testopengles_XPlay_Open(JNIEnv *env, jobject instance, jstring url_, jobject surface) {
+    const char *url = env->GetStringUTFChars(url_, 0);
+    LOGD("open url is %s",url);
+    //1 获取原始窗口
     ANativeWindow *nwin = ANativeWindow_fromSurface(env,surface);
-    ANativeWindow_setBuffersGeometry(nwin,outWidth,outHeight,WINDOW_FORMAT_RGBA_8888);
-    ANativeWindow_Buffer wbuf;
 
-    for(;;)
+    ////////////////////
+    ///EGL
+    //1 EGL display创建和初始化
+    EGLDisplay display = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+    if(display == EGL_NO_DISPLAY)
     {
-        //超过三秒
-        if(GetNowMs() - start >= 3000)
-        {
-            LOGW("now decode fps is %d",frameCount/3);
-            start = GetNowMs();
-            frameCount = 0;
-        }
-
-        int re = av_read_frame(ic,pkt);
-        if(re != 0)
-        {
-
-            LOGW("读取到结尾处!");
-            int pos = 20 * r2d(ic->streams[videoStream]->time_base);
-            av_seek_frame(ic,videoStream,pos,AVSEEK_FLAG_BACKWARD|AVSEEK_FLAG_FRAME );
-            continue;
-        }
-
-        AVCodecContext *cc = vc;
-        if(pkt->stream_index == audioStream)
-            cc=ac;
-
-        //发送到线程中解码
-        re = avcodec_send_packet(cc,pkt);
-        //清理
-        int p = pkt->pts;
-        av_packet_unref(pkt);
-
-        if(re != 0)
-        {
-            LOGW("avcodec_send_packet failed!");
-            continue;
-        }
-
-        for(;;)
-        {
-            re = avcodec_receive_frame(cc,frame);
-            if(re !=0)
-            {
-                //LOGW("avcodec_receive_frame failed!");
-                break;
-            }
-            //LOGW("avcodec_receive_frame %lld",frame->pts);
-            //如果是视频帧
-            if(cc == vc)
-            {
-                frameCount++;
-                vctx = sws_getCachedContext(vctx,
-                                            frame->width,
-                                            frame->height,
-                                            (AVPixelFormat)frame->format,
-                                            outWidth,
-                                            outHeight,
-                                            AV_PIX_FMT_RGBA,
-                                            SWS_FAST_BILINEAR,
-                                            0,0,0
-                );
-                if(!vctx)
-                {
-                    LOGW("sws_getCachedContext failed!");
-                }
-                else
-                {
-                    uint8_t *data[AV_NUM_DATA_POINTERS] = {0};
-                    data[0] =(uint8_t *)rgb;
-                    int lines[AV_NUM_DATA_POINTERS] = {0};
-                    lines[0] = outWidth * 4;
-                    int h = sws_scale(vctx,
-                                      (const uint8_t **)frame->data,
-                                      frame->linesize,0,
-                                      frame->height,
-                                      data,lines);
-                    LOGW("sws_scale = %d",h);
-                    if(h > 0)
-                    {
-                        ANativeWindow_lock(nwin,&wbuf,0);
-                        uint8_t *dst = (uint8_t*)wbuf.bits;
-                        memcpy(dst,rgb,outWidth*outHeight*4);
-                        ANativeWindow_unlockAndPost(nwin);
-                    }
-                }
-
-            }
-            else //音频
-            {
-                uint8_t *out[2] = {0};
-                out[0] = (uint8_t*) pcm;
-
-                //音频重采样
-                int len = swr_convert(actx,out,
-                                      frame->nb_samples,
-                                      (const uint8_t**)frame->data,
-                                      frame->nb_samples);
-                LOGW("swr_convert = %d",len);
-            }
-
-        }
-
-        //////////////////////
-
-
+        LOGD("eglGetDisplay failed!");
+        return;
     }
-    delete rgb;
-    delete pcm;
+    if(EGL_TRUE != eglInitialize(display,0,0))
+    {
+        LOGD("eglInitialize failed!");
+        return;
+    }
+    //2 surface
+    //2-1 surface窗口配置
+    //输出配置
+    EGLConfig config;
+    EGLint configNum;
+    EGLint configSpec[] = {
+            EGL_RED_SIZE, 8,
+            EGL_GREEN_SIZE, 8,
+            EGL_BLUE_SIZE, 8,
+            EGL_SURFACE_TYPE, EGL_WINDOW_BIT, EGL_NONE
+    };
+    if(EGL_TRUE != eglChooseConfig(display,configSpec,&config,1,&configNum))
+    {
+        LOGD("eglChooseConfig failed!");
+        return;
+    }
+    //创建surface
+    EGLSurface winsurface = eglCreateWindowSurface(display,config,nwin,0);
+    if(winsurface == EGL_NO_SURFACE)
+    {
+        LOGD("eglCreateWindowSurface failed!");
+        return;
+    }
+
+    //3 context 创建关联的上下文
+    const EGLint ctxAttr[] = {
+            EGL_CONTEXT_CLIENT_VERSION,2,EGL_NONE
+    };
+    EGLContext context = eglCreateContext(display,config,EGL_NO_CONTEXT,ctxAttr);
+    if(context == EGL_NO_CONTEXT)
+    {
+        LOGD("eglCreateContext failed!");
+        return;
+    }
+    if(EGL_TRUE != eglMakeCurrent(display,winsurface,winsurface,context))
+    {
+        LOGD("eglMakeCurrent failed!");
+        return;
+    }
+
+    LOGD("EGL Init Success!");
+
+    //顶点和片元shader初始化
+    //顶点shader初始化
+    GLint vsh = InitShader(vertexShader,GL_VERTEX_SHADER);
+    //片元yuv420 shader初始化
+    GLint fsh = InitShader(fragYUV420P,GL_FRAGMENT_SHADER);
 
 
 
-    //关闭上下文
-    avformat_close_input(&ic);
 
 
-
-    env->ReleaseStringUTFChars(url_, path);
+    env->ReleaseStringUTFChars(url_, url);
 }

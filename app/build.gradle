@@ -3,7 +3,7 @@ apply plugin: 'com.android.application'
 android {
     compileSdkVersion 26
     defaultConfig {
-        applicationId "aplay.testffmpeg"
+        applicationId "aplay.testopengles"
         minSdkVersion 14
         targetSdkVersion 26
         versionCode 1
@@ -13,16 +13,7 @@ android {
             cmake {
                 cppFlags "-std=c++11"
             }
-            ndk{
-                abiFilters "armeabi-v7a"
-            }
         }
-        sourceSets{
-            main{
-                jniLibs.srcDirs=['libs']
-            }
-        }
-
     }
     buildTypes {
         release {
