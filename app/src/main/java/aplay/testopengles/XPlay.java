@@ -17,7 +17,7 @@ public class XPlay extends GLSurfaceView implements Runnable,SurfaceHolder.Callb
 
     @Override
     public void run() {
-        Open("/sdcard/outyuv",getHolder().getSurface());
+        Open("/sdcard/out.yuv",getHolder().getSurface());
 
     }
     @Override
